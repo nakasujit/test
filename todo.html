@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Todoアプリ</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: "Noto Sans JP", "Hiragino Sans", sans-serif;
+    background: #f0f4f8;
+    color: #2d3748;
+    min-height: 100vh;
+    padding: 24px 16px 60px;
+  }
+
+  h1 {
+    text-align: center;
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: #2b6cb0;
+    margin-bottom: 24px;
+    letter-spacing: 1px;
+  }
+
+  .add-form {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 24px;
+    max-width: 520px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .add-form input {
+    flex: 1;
+    padding: 12px 16px;
+    border: 2px solid #bee3f8;
+    border-radius: 10px;
+    font-size: 1rem;
+    outline: none;
+    background: #fff;
+    transition: border-color 0.2s;
+  }
+
+  .add-form input:focus { border-color: #3182ce; }
+
+  .add-form button {
+    padding: 12px 20px;
+    background: #3182ce;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.2s;
+  }
+
+  .add-form button:hover { background: #2b6cb0; }
+
+  .filters {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  .filter-btn {
+    padding: 6px 18px;
+    border-radius: 20px;
+    border: 2px solid #bee3f8;
+    background: #fff;
+    color: #3182ce;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .filter-btn.active {
+    background: #3182ce;
+    color: #fff;
+    border-color: #3182ce;
+  }
+
+  .task-list {
+    max-width: 520px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .task-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    transition: transform 0.15s;
+  }
+
+  .task-card:hover { transform: translateY(-1px); }
+
+  .task-name {
+    flex: 1;
+    font-size: 0.98rem;
+    line-height: 1.4;
+    word-break: break-all;
+  }
+
+  .task-name.done {
+    text-decoration: line-through;
+    color: #a0aec0;
+  }
+
+  .badge {
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 20px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: opacity 0.2s;
+    user-select: none;
+  }
+
+  .badge:hover { opacity: 0.75; }
+  .badge.todo    { background: #ebf8ff; color: #2b6cb0; border: 1px solid #bee3f8; }
+  .badge.doing   { background: #fffbeb; color: #b7791f; border: 1px solid #fefcbf; }
+  .badge.done-bg { background: #f0fff4; color: #276749; border: 1px solid #c6f6d5; }
+
+  .del-btn {
+    background: none;
+    border: none;
+    color: #cbd5e0;
+    font-size: 1.2rem;
+    cursor: pointer;
+    line-height: 1;
+    transition: color 0.2s;
+    padding: 2px 4px;
+  }
+
+  .del-btn:hover { color: #fc8181; }
+
+  .empty {
+    text-align: center;
+    color: #a0aec0;
+    font-size: 0.95rem;
+    padding: 40px 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>📝 Todoアプリ</h1>
+
+<form class="add-form" id="addForm">
+  <input type="text" id="taskInput" placeholder="タスクを入力..." maxlength="100" />
+  <button type="submit">追加</button>
+</form>
+
+<div class="filters">
+  <button class="filter-btn active" data-filter="all">すべて</button>
+  <button class="filter-btn" data-filter="todo">未着手</button>
+  <button class="filter-btn" data-filter="doing">着手中</button>
+  <button class="filter-btn" data-filter="done">完了</button>
+</div>
+
+<div class="task-list" id="taskList"></div>
+
+<script>
+  const STATUS = ['todo', 'doing', 'done'];
+  const LABEL  = { todo: '未着手', doing: '着手中', done: '完了' };
+  const BADGE  = { todo: 'todo', doing: 'doing', done: 'done-bg' };
+
+  let tasks  = JSON.parse(localStorage.getItem('tasks') || '[]');
+  let filter = 'all';
+
+  function save() {
+    localStorage.setItem('tasks', JSON.stringify(tasks));
+  }
+
+  function render() {
+    const list = document.getElementById('taskList');
+    const visible = filter === 'all' ? tasks : tasks.filter(t => t.status === filter);
+
+    if (visible.length === 0) {
+      list.innerHTML = '<div class="empty">タスクがありません</div>';
+      return;
+    }
+
+    list.innerHTML = visible.map(t => `
+      <div class="task-card">
+        <span class="task-name ${t.status === 'done' ? 'done' : ''}">${esc(t.name)}</span>
+        <span class="badge ${BADGE[t.status]}" data-id="${t.id}" title="クリックで状態変更">
+          ${LABEL[t.status]}
+        </span>
+        <button class="del-btn" data-del="${t.id}" title="削除">✕</button>
+      </div>
+    `).join('');
+
+    list.querySelectorAll('.badge').forEach(el => {
+      el.addEventListener('click', () => {
+        const t = tasks.find(x => x.id === el.dataset.id);
+        if (!t) return;
+        t.status = STATUS[(STATUS.indexOf(t.status) + 1) % STATUS.length];
+        save(); render();
+      });
+    });
+
+    list.querySelectorAll('.del-btn').forEach(el => {
+      el.addEventListener('click', () => {
+        tasks = tasks.filter(x => x.id !== el.dataset.del);
+        save(); render();
+      });
+    });
+  }
+
+  document.getElementById('addForm').addEventListener('submit', e => {
+    e.preventDefault();
+    const input = document.getElementById('taskInput');
+    const name = input.value.trim();
+    if (!name) return;
+    tasks.unshift({ id: Date.now().toString(), name, status: 'todo' });
+    input.value = '';
+    save(); render();
+  });
+
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      filter = btn.dataset.filter;
+      document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      render();
+    });
+  });
+
+  function esc(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  render();
+</script>
+</body>
+</html>
