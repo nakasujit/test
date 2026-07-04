@@ -103,7 +103,7 @@
     justify-content:center;
     text-align:center;
     padding:18px;
-    margin-bottom:22px;
+    margin-bottom:12px;
     cursor:pointer;
     overflow:hidden;
     transition: border-color 0.2s ease, background 0.2s ease;
@@ -147,6 +147,33 @@
     letter-spacing:0.05em;
   }
   #fileInput{ display:none; }
+
+  /* 写真の選び方ボタン（撮影 / ライブラリ） */
+  .source-buttons{
+    display:flex;
+    gap:10px;
+    margin-bottom:22px;
+  }
+  .source-btn{
+    -webkit-tap-highlight-color: transparent;
+    appearance:none;
+    cursor:pointer;
+    flex:1;
+    border:1px solid var(--ine);
+    background:#fff;
+    color:var(--ine-deep);
+    font-family:inherit;
+    font-size:13px;
+    font-weight:700;
+    letter-spacing:0.04em;
+    padding:11px 0;
+    border-radius:999px;
+    transition: background 0.15s ease, transform 0.15s ease;
+  }
+  .source-btn:active{
+    background:var(--paper-deep);
+    transform:translateY(1px);
+  }
 
   /* メモ欄 */
   textarea{
@@ -362,7 +389,15 @@
     <img id="previewImg" style="display:none;">
     <div class="retake-badge" id="retakeBadge" style="display:none;">タップして変更</div>
   </div>
-  <input type="file" id="fileInput" accept="image/*" capture="environment">
+
+  <!-- 「ライブラリから選ぶ」と「撮影する」を分離。
+       ライブラリ用は capture を付けない → iPhoneでカメラロールから選ふる -->
+  <div class="source-buttons">
+    <button type="button" class="source-btn" id="libraryBtn">🖼 写真を選ぶ</button>
+    <button type="button" class="source-btn" id="cameraBtn">📷 撮影する</button>
+  </div>
+  <input type="file" id="fileInput" accept="image/*">
+  <input type="file" id="cameraInput" accept="image/*" capture="environment">
 
   <div class="section-label"><span class="num">2</span>状況メモ（任意）</div>
   <textarea id="memo" placeholder="例：田植えから約2か月、品種はコシヒカリ、最近の天気は雨が多い、など"></textarea>
@@ -401,6 +436,9 @@
 <script>
   const uploadArea = document.getElementById('uploadArea');
   const fileInput = document.getElementById('fileInput');
+  const cameraInput = document.getElementById('cameraInput');
+  const libraryBtn = document.getElementById('libraryBtn');
+  const cameraBtn = document.getElementById('cameraBtn');
   const uploadPlaceholder = document.getElementById('uploadPlaceholder');
   const previewImg = document.getElementById('previewImg');
   const retakeBadge = document.getElementById('retakeBadge');
@@ -414,30 +452,80 @@
   const noteCard = document.getElementById('noteCard');
   const memo = document.getElementById('memo');
 
+  // ↓↓↓ あなたの Supabase プロジェクトの Function URL に書き換えてください ↓↓↓
+  const DIAGNOSE_URL = "https://hwwwouxtffdnrsnxdrck.supabase.co/functions/v1/diagnose";
+
   let imageBase64 = null;
   let imageMediaType = null;
 
+  // アップロード領域タップ＝ライブラリから選択（iPhoneでカメラロールが開く）
   uploadArea.addEventListener('click', () => fileInput.click());
+  libraryBtn.addEventListener('click', () => fileInput.click());
+  cameraBtn.addEventListener('click', () => cameraInput.click());
 
-  fileInput.addEventListener('change', () => {
-    const file = fileInput.files[0];
+  fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
+  cameraInput.addEventListener('change', () => handleFile(cameraInput.files[0]));
+
+  function handleFile(file){
     if (!file) return;
+    // iPhoneのHEICや大きすぎる写真に対応するため、
+    // 一度canvasに描画して「縮小したJPEG」に変換してから使う。
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
 
-    imageMediaType = file.type;
+    img.onload = () => {
+      const maxDim = 1568; // Anthropic推奨の長辺上限に合わせて縮小
+      let width = img.naturalWidth || img.width;
+      let height = img.naturalHeight || img.height;
+      if (width > maxDim || height > maxDim) {
+        const scale = maxDim / Math.max(width, height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
 
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const dataUrl = e.target.result;
-      imageBase64 = dataUrl.split(',')[1];
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
 
-      previewImg.src = dataUrl;
-      previewImg.style.display = 'block';
-      uploadPlaceholder.style.display = 'none';
-      retakeBadge.style.display = 'block';
-      uploadArea.classList.add('has-image');
+      const jpegDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+      imageBase64 = jpegDataUrl.split(',')[1];
+      imageMediaType = 'image/jpeg';
+
+      showPreview(jpegDataUrl);
+      URL.revokeObjectURL(objectUrl);
     };
-    reader.readAsDataURL(file);
-  });
+
+    img.onerror = () => {
+      // canvasで読めない場合（ごく一部の古い環境のHEIC等）は、
+      // 元ファイルをそのまま読み込むフォールバック。
+      URL.revokeObjectURL(objectUrl);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const dataUrl = e.target.result;
+        imageBase64 = dataUrl.split(',')[1];
+        imageMediaType = file.type || 'image/jpeg';
+        showPreview(dataUrl);
+      };
+      reader.onerror = () => {
+        errorBox.textContent = '写真を読み込めませんでした。別の写真でお試しください。';
+        errorBox.classList.add('show');
+      };
+      reader.readAsDataURL(file);
+    };
+
+    img.src = objectUrl;
+  }
+
+  function showPreview(dataUrl){
+    errorBox.classList.remove('show');
+    previewImg.src = dataUrl;
+    previewImg.style.display = 'block';
+    uploadPlaceholder.style.display = 'none';
+    retakeBadge.style.display = 'block';
+    uploadArea.classList.add('has-image');
+  }
 
   const icons = {
     weeding: "🌿",
@@ -474,77 +562,25 @@
     analyzeBtn.disabled = true;
     loading.classList.add('show');
 
-    const today = new Date();
-    const dateStr = `${today.getFullYear()}年${today.getMonth()+1}月${today.getDate()}日`;
     const memoText = memo.value.trim();
 
-    const systemPrompt = `あなたは日本の水稲栽培に詳しい営農指導員です。
-ユーザーが送る田んぼの写真（と任意のメモ）から、稲の生育ステージを推定し、
-「いまから今後1〜2週間程度で行うべき作業（ToDo）」を整理してください。
-
-考慮する作業の例：除草剤・畔の草刈り・水管理（入水・落水・中干し）・追肥・病害虫の見回り・
-コンバインによる収穫準備・収穫後の乾燥・次作の準備　など。
-写真からはっきり判断できない場合は、複数の可能性を踏まえつつ、
-一般的な季節（${dateStr}頃）から考えて妥当な作業を提案してください。
-
-必ず次のJSON形式のみで回答してください。前置きや説明、Markdownのコードブロック記号は一切付けないでください。
-
-{
-  "stage": "推定される生育ステージ（例：分げつ期、出穂期、収穫期など）を15文字程度で",
-  "stage_desc": "そのステージと写真から読み取れる状況についての説明（80文字程度）",
-  "todos": [
-    {
-      "category": "weeding | herbicide | water | fertilizer | pest | combine | drying | inspection | other のいずれか",
-      "title": "作業名（10文字程度）",
-      "detail": "具体的な作業内容や注意点（60〜100文字程度）",
-      "timing": "目安となる時期や期限（例：今週中、出穂前まで、など20文字程度）",
-      "priority": "high | mid | low"
-    }
-  ],
-  "note": "全体への一言アドバイスや、写真から判断しきれない点への補足（80字程度）"
-}
-
-todosは3〜5件にしてください。`;
-
-    const userText = memoText
-      ? `状況メモ：${memoText}\n今日の日付：${dateStr}\nこの田んぼの写真を見て、上記フォーマットのJSONで回答してください。`
-      : `今日の日付：${dateStr}\nこの田んぼの写真を見て、上記フォーマットのJSONで回答してください。`;
-
     try {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
+      // Supabase Edge Function を呼ぶ（APIキーはサーバー側に秘匿）
+      const response = await fetch(DIAGNOSE_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 1000,
-          system: systemPrompt,
-          messages: [
-            {
-              role: "user",
-              content: [
-                {
-                  type: "image",
-                  source: {
-                    type: "base64",
-                    media_type: imageMediaType || "image/jpeg",
-                    data: imageBase64
-                  }
-                },
-                { type: "text", text: userText }
-              ]
-            }
-          ]
+          imageBase64: imageBase64,
+          mediaType: imageMediaType || "image/jpeg",
+          memo: memoText
         })
       });
 
-      const data = await response.json();
-      const textBlock = (data.content || []).find(c => c.type === 'text');
-      if (!textBlock) throw new Error('応答を取得できませんでした。');
+      const parsed = await response.json();
 
-      let clean = textBlock.text.trim();
-      clean = clean.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
-
-      const parsed = JSON.parse(clean);
+      if (!response.ok || parsed.error) {
+        throw new Error(parsed.error || '診断サーバーの呼び出しに失敗しました。');
+      }
 
       stageValue.textContent = parsed.stage || '-';
       stageDesc.textContent = parsed.stage_desc || '';
